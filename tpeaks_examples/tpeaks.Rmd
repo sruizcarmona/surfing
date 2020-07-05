@@ -1,0 +1,754 @@
+---
+title: "Training Peaks"
+output:
+  html_notebook:
+    toc: true
+    toc_depth: 3
+    toc_float:
+      collapsed: false
+      smooth_scroll: true
+    theme: cosmo
+    df_print: paged
+    highlight: tango
+    code_folding: hide
+    # fig_width: 12
+    # fig_height: 12
+# output:
+#   epuRate::BAKER:
+#     toc: TRUE
+#     number_sections: FALSE
+#     code_folding: "show"
+---
+
+<script>
+$(document).ready(function() {
+  $items = $('div#TOC li');
+  $items.each(function(idx) {
+    num_ul = $(this).parentsUntil('#TOC').length;
+    $(this).css({'text-indent': num_ul * 10, 'padding-left': 0});
+  });
+
+});
+</script>
+
+***
+
+# TrainingPeaks Data
+
+## Preliminary tasks
+### Load Libraries
+
+Load libraries for reading fit data and create maps and plots.
+
+```{r warning=FALSE, results='hide', echo='FALSE'}
+library(fit)
+library(ggplot2)
+library(leaflet)
+library(dplyr)
+library(cetcolor)
+```
+
+*** 
+## Manual Example (WhiteLiam)
+
+Date: 16 April 2019, cycling
+
+File: fit-test_cycling_2019-04-16_05-29-42.csv.fit
+
+```{r}
+data <- read.fit('fit-test_cycling_2019-04-16_05-29-42.csv.fit')
+```
+
+### What can we get from TrainingPeaks?
+
+Lots of metadata from the fit file:
+*  file id
+*  device settings
+*  user properties
+*  sport / sport type
+* etc. 
+
+```{r echo = False}
+names(data)
+```
+
+And more specifics about the activity:
+
+```{r echo = False}
+head(data$record)
+```
+
+With their corresponding units:
+
+```{r}
+matrix(c(attr(data$record,'names'),attr(data$record,'units')),ncol=2)
+```
+
+### Basic Plots
+
+#### Elevation vs Time
+
+```{r fig.width = 6}
+pdata <- with(data$record, data.frame(alt = altitude, time = (timestamp-timestamp[1])/60))
+ ggplot(pdata, aes(y=alt, x=time)) + geom_line() +
+   ggtitle("Elevation vs Time") + xlab("time (minutes)") + ylab("elevation (m)")
+```
+
+#### Elevation vs Distance
+
+```{r fig.width = 6}
+pdata <- with(data$record, data.frame(alt = altitude, time = (distance-distance[1])/1000))
+ ggplot(pdata, aes(y=alt, x=time)) + geom_line() +
+   ggtitle("Elevation vs Distance") + xlab("Distance (km)") + ylab("elevation (m)")
+```
+
+#### Summary of all variables (Strava-like)
+
+```{r fig.width = 6}
+pdata <- with(data$record, data.frame(alt = altitude, time = (distance-distance[1])/1000,
+                                      pow = power, hr=heart_rate, speed=speed, cad=cadence))
+pdata <- pdata[-(1:10),]
+pdata$grad <- with(data$record, 100 * diff(altitude,lag=10) / diff(distance,lag=10))
+
+ ggplot(pdata, aes(y=alt, x=time)) +
+   geom_line(aes(y=alt,colour="Altitude")) +
+   geom_line(aes(y=pow*2,colour="Power"),size=0.05) +
+   geom_line(aes(y=hr*2,colour="HR"),size=0.1) +
+   geom_line(aes(y=speed*3.69*2,colour="Speed"),size=0.1) +
+   geom_line(aes(y=cad*2,colour="Cadence"),size=0.05) +
+   geom_line(aes(y=grad*10+min(pdata$alt),colour="Gradient"),size=0.2) +
+   # geom_abline(intercept=min(pdata$alt), slope=0,color="orange",size=1,lty="longdash") +
+   geom_segment(aes(x = 0, xend = max(pdata$time), y = min(pdata$alt), yend = min(pdata$alt)),color="orange",size=0.8) +
+   scale_y_continuous(sec.axis = sec_axis(~./2, name = "HR (bpm) / Power (W) / Gradient (%) \n Speed (kph) / Cadence(rpm)"),
+                      breaks = seq(0, 1000, by = 200)) +
+   scale_x_continuous(breaks= seq(0, 70, by = 10)) +
+   ggtitle("Distance vs All") +
+   xlab("Distance (km)") +
+   ylab("Altitude (m)") +
+   scale_colour_manual(values = c("black", "purple","orange","red","blue","green")) +
+   labs(y = "Altitude (m)",
+                x = "Distance (km)",
+                colour = "") +
+   theme_minimal() +
+   # theme(legend.position = c(0.9, 0.93))
+   theme(legend.position = "bottom")
+```
+
+#### Heart Rate vs Gradient
+
+The steepest the climb, the hardest the heart has to work.
+
+```{r fig.width = 6}
+pdata <- data$record[-(1:10),c("heart_rate","timestamp")]
+# compute average gradient, as %
+ pdata$gradient <- with(data$record, 100 * diff(altitude,lag=10) / diff(distance,lag=10))
+ pdata <- subset(pdata, complete.cases(pdata) & abs(gradient) < 7.5 & gradient != 0) # drop outliers
+ ggplot(pdata, aes(x=gradient, y=heart_rate)) +
+   geom_point(alpha=0.5) + geom_jitter() +
+   stat_smooth(method="lm", formula=y ~ poly(x, 2)) +
+   ggtitle("Heart rate vs gradient")
+```
+
+With the corresponding correlation:
+
+```{r echo =F}
+ fit <- lm(heart_rate ~ poly(gradient, 2), data=pdata)
+ summary(fit)
+```
+
+And averages for each gradient step:
+
+```{r}
+pred <- data.frame(gradient = seq(-6,6,2))
+pred$heart_rate <- predict(fit, pred)
+t(pred)
+```
+
+### Activity Maps
+
+Convert time to minutes and add direction (Outbound vs Return):
+ 
+```{r}
+ # points <- subset(data$record, complete.cases(data$record))
+points <- data$record
+points$time_min  <- with(points, timestamp - timestamp[1])/60 # minutes of riding
+
+# from diagram above, we turned around at the 90 minutes mark
+# points[which(points$altitude == max(points$altitude)),]
+points$direction <- with(points, factor(ifelse(time_min < 90, 'Outbound', 'Return')))
+```
+
+```{r}
+ # library(leaflet)
+ # leaflet(points[points$direction == 'Outbound',]) %>% addTiles() %>% addPolylines(~position_long,~position_lat)
+ # leaflet(points[points$direction == 'Return',]) %>% addTiles() %>% addPolylines(~position_long,~position_lat)
+```
+
+#### Map with HR
+
+The darker the colour, the higher the HR is:
+
+```{r}
+newcols <- rev(cet_pal(min(dim(points)[1],256),name="l3"))
+points <- points %>% mutate(quantile=ntile(heart_rate,256))
+newcols.quantile <- newcols[points$quantile]
+points1 <- points %>%
+ mutate(nextLat = lead(position_lat),
+        nextLng = lead(position_long),
+        color = newcols.quantile
+        )
+gradient_map <- leaflet() %>%
+ addTiles()
+# points1 <- points1[points1$direction == 'Outbound',]
+for (i in 1:nrow(points1)) {
+ gradient_map <- addPolylines(map = gradient_map,
+                              data = points1,
+                              lng = as.numeric(points1[i, c('position_long', 'nextLng')]),
+                              lat = as.numeric(points1[i, c('position_lat', 'nextLat')]),
+                              color = as.character(points1[i, c('color')])
+ )
+}
+gradient_map
+```
+
+#### Map with HR and profile
+
+And we can overlap different measurements to the same plot.
+The darker the colour, the higher the HR and the higher the altitude (for the new line):
+
+
+```{r}
+newcols <- rev(cet_pal(min(dim(points)[1],256),name="l3"))
+newcols_alt <- rev(cet_pal(min(dim(points)[1],256),name="l7"))
+points <- points %>% mutate(quantile=ntile(heart_rate,256))
+points <- points %>% mutate(quantile_alt=ntile(altitude,256))
+newcols.quantile <- newcols[points$quantile]
+points1 <- points %>%
+ mutate(nextLat = lead(position_lat),
+        nextLng = lead(position_long),
+        color = newcols.quantile,
+        color_alt = newcols_alt[points$quantile_alt]
+        )
+gradient_map <- leaflet() %>% addTiles()
+# points1 <- points1[points1$direction == 'Outbound',]
+for (i in 1:nrow(points1)) {
+# for (i in 1:500) {
+ gradient_map <- addPolylines(map = gradient_map,
+                              data = points1,
+                              lng = as.numeric(points1[i, c('position_long', 'nextLng')]),
+                              lat = as.numeric(points1[i, c('position_lat', 'nextLat')]),
+                              color = as.character(points1[i, c('color')])
+ )
+}
+
+for (i in 1:which.max(points1$quantile_alt)) {
+# for (i in 1:500) {
+ gradient_map <- addPolylines(map = gradient_map,
+                              data = points1,
+                              lng = as.numeric(points1[i, c('position_long', 'nextLng')])-0.005,
+                              lat = as.numeric(points1[i, c('position_lat', 'nextLat')])-0.005,
+                              color = as.character(points1[i, c('color_alt')])
+ )
+}
+
+gradient_map
+```
+
+#### Map of a different activity
+
+Function to create map:
+
+```{r}
+create_map_fit <- function (fit_data,alt){
+  points <- fit_data$record
+  newcols <- rev(cet_pal(min(dim(points)[1],256),name="l3"))
+  newcols_alt <- rev(cet_pal(min(dim(points)[1],256),name="l7"))
+  points <- points %>% mutate(quantile=ntile(heart_rate,256))
+  if (alt == TRUE) {
+    points <- points %>% mutate(quantile_alt=ntile(altitude,256))
+  }
+  if (alt == TRUE) {
+    points1 <- points %>% mutate(nextLat = lead(position_lat),
+                               nextLng = lead(position_long),
+                               color = newcols[points$quantile],
+                               color_alt = newcols_alt[points$quantile_alt])
+  } else {
+    points1 <- points %>% mutate(nextLat = lead(position_lat),
+                               nextLng = lead(position_long),
+                               color = newcols[points$quantile])
+  }
+  
+  #prepare map
+  gradient_map <- leaflet() %>% addTiles()
+  for (i in 1:nrow(points1)) {
+   gradient_map <- addPolylines(map = gradient_map,
+                                data = points1,
+                                lng = as.numeric(points1[i, c('position_long', 'nextLng')]),
+                                lat = as.numeric(points1[i, c('position_lat', 'nextLat')]),
+                                color = as.character(points1[i, c('color')]))
+  }
+  if (alt == TRUE) {
+    # for (i in 1:which.max(points1$quantile_alt)) {
+    for (i in 1:nrow(points1)) {
+     gradient_map <- addPolylines(map = gradient_map,
+                                  data = points1,
+                                  lng = as.numeric(points1[i, c('position_long', 'nextLng')])-0.005,
+                                  lat = as.numeric(points1[i, c('position_lat', 'nextLat')])-0.005,
+                                  color = as.character(points1[i, c('color_alt')]))
+    }
+  }
+  gradient_map
+}
+```
+
+```{r}
+t <- read.fit("SELECTED_FILES/WhiteLiam/09/WhiteL1994.2019-09-20-23-05-29-293Z.GarminPush.40964805705.fit")
+create_map_fit(t,alt=TRUE)
+```
+
+***
+
+# TrainingPeaks Analysis
+
+## Extract predictors from activities
+
+We want to calculate different predictors based on the training activity:
+Phase 1 will contain:
+ 
+* Number of Activities
+* Volume (Time)
+* Intensity
+  * %HRmax
+  * Thresholds (Time in T1/T2)
+  * Volume x %HRmax
+* Sessions per week
+* Average time
+* Average speed (cycling vs running, etc?)
+  * Event type = 1 == cycling??
+  * sport = 2?
+    * 2 = cycling
+    * 5 = swimming
+  * https://developer.garmin.com/downloads/connect-iq/monkey-c/doc/Toybox/ActivityRecording.html
+* Average HR
+* Heart beats per week/year of training
+* Average accumulated power
+* Data from TrainingPeaks? (data$session)
+  * Calories
+  * Total ascent
+  * max_power
+  * average_power / normalized_power
+  * total work
+  * training_stress_score
+  * total_distance
+  * intensity_factor
+  * avg_HR
+
+### Predictors
+
+Read activity data
+(Only 1 for the moment, but will loop through all activities later):
+
+```{r}
+# data <- read.fit('fit-test_cycling_2019-04-16_05-29-42.csv.fit')
+# data <- read.fit('RAW/WorkoutFileExport-White-Liam-2019-04-01-2019-10-01/WhiteL1994.2019-04-16-07-58-54-572Z.GarminPush.33102899171.fit')
+data <- read.fit('RAW/WorkoutFileExport-White-Liam-2019-04-01-2019-10-01/WhiteL1994.2019-04-17-08-34-41-343Z.GarminPush.33150696869.fit')
+baddata <- read.fit("SELECTED_FILES/WhiteLiam/09/WhiteL1994.2019-09-12-07-01-07-759Z.GarminPush.40489308023.fit")
+```
+
+Initialize predictors df with activity id:
+
+*  Number of Activities
+
+```{r}
+predictors <- as.data.frame(matrix(1,ncol=1))
+colnames(predictors) <- c("activity.id")
+```
+
+* Volume (Time)
+
+```{r}
+activity.time <- round((max(data$record$timestamp)-data$record$timestamp[1])/60,2)
+predictors$time.min <- activity.time
+```
+
+* Intensity
+  * %HRmax
+  * Volume x %HRmax
+  
+```{r}
+predictors$hrmax.athlete <- data$zones_target$max_heart_rate
+predictors$hrmax.activity <- max(data$record$heart_rate)
+predictors$hrmax.perc <- round(predictors$hrmax.activity/predictors$hrmax.athlete*100,2)
+predictors$hrmax.intensity <- predictors$hrmax.perc * predictors$time.min
+```
+  
+  * Thresholds (Time in Z5/Z4/Z3)
+https://blogs.sas.com/content/efs/2018/01/26/data-driven-fitness-vo2-max-lactate-threshold-heart-rate/
+
+```{r}
+hr.zones <- quantile(c(1:predictors$hrmax.athlete),probs=seq(0,1,by=0.1))
+# we want zones 1 to 5
+data$record$hr.zones <- findInterval(data$record$heart_rate,hr.zones[6:10])
+hr.zones.table <- round(table(data$record$hr.zones)/sum(table(data$record$hr.zones))*100,1)
+predictors$hr.z5 <- hr.zones.table[6]
+predictors$hr.z4 <- hr.zones.table[5]
+predictors$hr.z3 <- hr.zones.table[4]
+predictors$hr.z2 <- hr.zones.table[3]
+predictors$hr.z1 <- hr.zones.table[2]
+```
+  
+* Sessions per week (ATHLETE CALCULATION)
+Will add a week counter
+
+```{r}
+predictors$week <- 1
+```
+
+* Average HR
+
+```{r}
+# predictors$hr.avg <- mean(data$record$heart_rate)
+predictors$hr.avg <- data$session$avg_heart_rate
+```
+
+* Average speed (cycling vs running, etc?)
+  * Event type = 1 == cycling??
+  * sport = 2?
+
+```{r}
+sport_code <- c(0,1,2,5,10,15)
+sport_type <- c("Undefined","Running","Cycling","Swimming","Rowing")
+predictors$sport_code <- data$session$sport
+predictors$sport_type <- sport_type[which (sport_code == predictors$sport_code)]
+predictors$speed.avg <- round(data$session$avg_speed*3.79,1)
+```
+  
+  * Average accumulated power (ATHLETE CALCULATION)
+* Heart beats per week/year of training (ATHLETE CALCULATION)
+* Data from TrainingPeaks? (data$session)
+  * Calories
+```{r}
+predictors$cal <- data$session$total_calories
+```
+  * Total ascent
+```{r}
+predictors$ascent <- data$session$total_ascent
+```
+
+  * max_power
+  * average_power / normalized_power
+  
+```{r}
+predictors$power.max <- data$session$max_power
+predictors$power.avg <- data$session$avg_power
+predictors$power.norm <- data$session$normalized_power
+```
+  * total work
+```{r}
+predictors$work <- data$session$total_work
+```
+  * training_stress_score
+```{r}
+predictors$stress.score <- data$session$training_stress_score
+```
+  * total_distance
+```{r}
+predictors$total.dist <- data$session$total_distance
+```
+  * intensity_factor
+```{r}
+predictors$intensity.factor <- data$session$intensity_factor
+```
+
+
+Which will give us a table as follows:
+
+```{r}
+predictors
+```
+
+*** 
+
+## Subset 10 athletes
+
+### Athlete original data
+
+We will have VO2max for all participants (Name, VO2max, Weight):
+
+```{r}
+library(purrr)
+vo2max <- read.csv("VO2maxdata.csv")
+vo2max <- vo2max[vo2max$EventName == "Baseline",]
+row.names(vo2max) <- 1:nrow(vo2max)
+vo2max <- vo2max %>% mutate(name= map(strsplit(as.character(Athlete), "(?!^)(?=[[:upper:]])", perl=T),~.x[1]) %>% unlist())
+vo2max
+```
+
+### Athlete input files
+
+Get all files for the 10 athletes (September 2019):
+
+```{r}
+dirs <- list.dirs("SELECTED_FILES",recursive=F)
+for (ath in vo2max$name){
+  k <- paste0(dirs[grep(tolower(ath),tolower(dirs))],"/09")
+  print(k)
+  print(head(list.files(k),1))
+}
+```
+
+*** 
+
+## Predictors for all activities
+
+Our goal now is to create a framework that inputs a list of files and returns a table with all predictors.
+First for all Fit files of athletes and then, calculate totals and averages for each of the athletes.
+
+### Test Case (WhiteLiam)
+
+Get all WhiteLiam files
+
+```{r}
+whitefiles <- paste0(paste0(dirs[grep("liam",tolower(dirs))],"/09/"),list.files(paste0(dirs[grep("liam",tolower(dirs))],"/09")))
+```
+
+And create a function to calculate all predictors as previously, given a list of Fit files:
+
+```{r}
+calc_predictors <- function (fitFiles) {
+  #initialize predictors
+  all.predictors <- as.data.frame(matrix(vector(),ncol=25))
+  colnames(all.predictors) <- c("activity.id","time.min","hrmax.athlete","hrmax.activity",
+                            "hrmax.perc","hrmax.intensity","hr.z5","hr.z4","hr.z3",
+                            "hr.z2","hr.z1","week","hr.avg","sport_code","sport_type","speed.avg","cal",
+                            "ascent","power.max","power.avg","power.norm","work",
+                            "stress.score","total.dist","intensity.factor")
+  activity.id = 1
+  for (myfile in fitFiles) {
+     # print(myfile)
+     data <- read.fit(myfile)
+     #check if there are NAs in data$record (some cases seen) --> JennerSamuel [5]
+     # if t
+     predictors <- as.data.frame(matrix(NA,ncol=25))
+     colnames(predictors) <- c("activity.id","time.min","hrmax.athlete","hrmax.activity",
+                            "hrmax.perc","hrmax.intensity","hr.z5","hr.z4","hr.z3",
+                            "hr.z2","hr.z1","week","hr.avg","sport_code","sport_type",
+                            "speed.avg","cal",
+                            "ascent","power.max","power.avg","power.norm","work",
+                            "stress.score","total.dist","intensity.factor")
+     activity.time <- round((max(data$record$timestamp)-data$record$timestamp[1])/60,2)
+     predictors$time.min <- activity.time
+     predictors$activity.id <- activity.id
+     #check if there is heart_rate info (not in swimming, surfing and other watersports)
+     if(is.null(data$zones_target$max_heart_rate)){
+       predictors$hrmax.athlete <- 200
+     } else {
+       predictors$hrmax.athlete <- data$zones_target$max_heart_rate
+     }
+     if (any(names(data$record) %in% "heart_rate")){
+       predictors$hrmax.activity <- max(data$record$heart_rate
+                                        [1:(length(data$record$heart_rate)-3)],na.rm=T)
+       predictors$hrmax.perc <- round(predictors$hrmax.activity/predictors$hrmax.athlete*100,2)
+       predictors$hrmax.intensity <- predictors$hrmax.perc * predictors$time.min
+       hr.zones <- quantile(c(1:predictors$hrmax.athlete),probs=seq(0,1,by=0.1))
+       data$record$hr.zones <- findInterval(data$record$heart_rate,hr.zones[6:10])
+       hr.zones.table<-round(table(data$record$hr.zones)/sum(table(data$record$hr.zones))*100,1)
+       predictors$hr.z5 <- hr.zones.table[6]
+       predictors$hr.z4 <- hr.zones.table[5]
+       predictors$hr.z3 <- hr.zones.table[4]
+       predictors$hr.z2 <- hr.zones.table[3]
+       predictors$hr.z1 <- hr.zones.table[2]
+       predictors$hr.avg <- data$session$avg_heart_rate
+     } else {
+       predictors$hrmax.athlete <- NA
+       predictors$hrmax.activity <- NA
+       predictors$hrmax.perc <- NA
+       predictors$hrmax.intensity <- NA
+       predictors$hr.z5 <- NA
+       predictors$hr.z4 <- NA
+       predictors$hr.z3 <- NA
+       predictors$hr.z2 <- NA
+       predictors$hr.z1 <- NA
+       predictors$hr.avg <- NA
+     }
+     predictors$week <- 1
+     predictors$sport_code <- data$session$sport
+     predictors$sport_type <- sport_type[which (sport_code == predictors$sport_code)]
+     predictors$speed.avg <- round(data$session$avg_speed*3.79,1)
+     predictors$cal <- if(is.null(data$session$total_calories)){NA}else{data$session$total_calories}
+     predictors$ascent <- if(is.null(data$session$total_ascent)){NA}else{data$session$total_ascent}
+     predictors$power.max <- if(is.null(data$session$max_power)){NA}else{data$session$max_power}
+     predictors$power.avg <- if(is.null(data$session$avg_power)){NA}else{data$session$avg_power}
+     predictors$power.norm <- if(is.null(data$session$normalized_power)){NA}else{data$session$normalized_power}
+     predictors$work <- if(is.null(data$session$total_work)){NA}else{data$session$total_work}
+     predictors$stress.score <- if(is.null(data$session$training_stress_score)){NA}
+                                else {data$session$training_stress_score}
+     predictors$total.dist <- data$session$total_distance
+     predictors$intensity.factor <-  if(is.null(data$session$intensity_factor)){NA}
+                                     else{data$session$intensity_factor}
+     all.predictors <- rbind(all.predictors,predictors)
+     activity.id <- activity.id+1
+     # print(all.predictors)
+  }
+   return(all.predictors)
+}
+```
+
+#### Example Output
+
+The function created above gives us the following results for the test with WhiteLiam files:
+
+```{r}
+athlete.predictors <- calc_predictors(whitefiles)
+athlete.predictors
+```
+
+***
+
+## Superpredictors as summary
+
+Superpredictors are averages or totals of each of the activity predictors, as a way to summarize training data for each athlete during the selected period.
+Here we calculate all of them to compare with vo2max in the final step.
+
+### Definition
+
+Define function to:
+* Initialize variables
+
+```{r}
+# final.data <- vo2max
+prep_superpredictors <- function(final.data){
+  final.data$activities.total <- NA
+  final.data$time.total <- NA
+  final.data$time.avg <- NA
+  final.data$hrmax.perc.avg <- NA
+  final.data$hrmax.max <- NA
+  final.data$hrmax.intensity.total <- NA
+  final.data$hrmax.intensity.avg <- NA
+  final.data$hr.z5.avg <- NA
+  final.data$hr.z4.avg <- NA
+  final.data$hr.z3.avg <- NA
+  final.data$hr.z2.avg <- NA
+  final.data$hr.z1.avg <- NA
+  final.data$hr.avg <- NA
+  final.data$cal.total <- NA
+  final.data$cal.avg <- NA
+  final.data$power.avg <- NA
+  final.data$work.avg <- NA
+  final.data$stress.score.avg <- NA
+  final.data$dist.total <- NA
+  final.data$dist.avg <- NA
+  final.data$intensity.factor.avg <- NA
+  return(final.data)
+}
+```
+
+* Calculate variables
+
+```{r}
+# ath <- 'Liam'
+get_superpredictors <- function (ath.data,ath.predictors,ath.name) {
+  ath.data[ath.data$name == ath.name,]$activities.total <- nrow(ath.predictors)
+  ath.data[ath.data$name == ath.name,]$time.total <- sum(ath.predictors$time.min)
+  ath.data[ath.data$name == ath.name,]$time.avg <- mean(ath.predictors$time.min,na.rm=T)
+  ath.data[ath.data$name == ath.name,]$hrmax.perc.avg <- mean(ath.predictors$hrmax.perc,na.rm=T)
+  ath.data[ath.data$name == ath.name,]$hrmax.max <- if (sum(!is.na(ath.predictors$hrmax.activity)) == 0 ){NA}else{max(ath.predictors$hrmax.activity,na.rm=T)}
+  ath.data[ath.data$name == ath.name,]$hrmax.intensity.total <- sum(ath.predictors$hrmax.intensity,na.rm=T)
+  ath.data[ath.data$name == ath.name,]$hrmax.intensity.avg <- mean(ath.predictors$hrmax.intensity,na.rm=T)
+  ath.data[ath.data$name == ath.name,]$hr.z5.avg <- mean(ath.predictors$hr.z5,na.rm=T)
+  ath.data[ath.data$name == ath.name,]$hr.z4.avg <- mean(ath.predictors$hr.z4,na.rm=T)
+  ath.data[ath.data$name == ath.name,]$hr.z3.avg <- mean(ath.predictors$hr.z3,na.rm=T)
+  ath.data[ath.data$name == ath.name,]$hr.z2.avg <- mean(ath.predictors$hr.z2,na.rm=T)
+  ath.data[ath.data$name == ath.name,]$hr.z1.avg <- mean(ath.predictors$hr.z1,na.rm=T)
+  ath.data[ath.data$name == ath.name,]$hr.avg <- mean(ath.predictors$hr.avg,na.rm=T)
+  ath.data[ath.data$name == ath.name,]$cal.total <- sum(ath.predictors$cal,na.rm=T)
+  ath.data[ath.data$name == ath.name,]$cal.avg <- mean(ath.predictors$cal,na.rm=T)
+  ath.data[ath.data$name == ath.name,]$power.avg <- mean(ath.predictors$power.avg,na.rm=T)
+  ath.data[ath.data$name == ath.name,]$work.avg <- mean(ath.predictors$work,na.rm=T)
+  ath.data[ath.data$name == ath.name,]$stress.score.avg <- mean(ath.predictors$stress.score,na.rm=T)
+  ath.data[ath.data$name == ath.name,]$dist.total <- sum(ath.predictors$total.dist,na.rm=T)
+  ath.data[ath.data$name == ath.name,]$dist.avg <- mean(ath.predictors$total.dist,na.rm=T)
+  ath.data[ath.data$name == ath.name,]$intensity.factor.avg <- mean(ath.predictors$intensity.factor,na.rm=T)
+  ath.data[is.na(ath.data)] <- NA
+  return(ath.data)
+}
+```
+
+
+### Calculate Superpredictors
+
+Combine the reading of the files with the superpredictor calculation
+
+```{r}
+dirs <- list.dirs("SELECTED_FILES",recursive=F)
+ath.superpreds <- prep_superpredictors(vo2max)
+```
+
+
+```{r}
+for (ath in vo2max$name){
+# for (ath in 'Liam'){
+  ath.folder <- paste0(dirs[grep(tolower(ath),tolower(dirs))],"/09/")
+  myfiles <- paste0(ath.folder, list.files(paste0(ath.folder)))
+  #get predictors
+  ath.predictors <- calc_predictors(myfiles)
+  #get superpredictors
+  ath.superpreds <- get_superpredictors(ath.superpreds,ath.predictors,ath)
+}
+```
+
+
+And the final results for all the athletes:
+
+```{r}
+ath.superpreds
+```
+
+***
+
+## Make correlation with VO2max
+
+Correlate all superpredictors with VO2max.
+Each point corresponds to an athlete:
+
+```{r}
+models <- as.data.frame(matrix(NA,ncol=22))
+models <- rbind(models,NA)
+row.names(models) <- c("rsquare","pvalue")
+colnames(models) <- names(ath.superpreds)[c(5,7:dim(ath.superpreds)[2])]
+```
+
+
+```{r}
+for (mod in names(models)){
+  md <- paste("VO2max ~ ",mod,sep = "")
+  lmTemp = lm(md, data = ath.superpreds) #Create the linear regression
+  plot(ath.superpreds[[mod]],ath.superpreds$VO2max, pch = 16, col = "blue",xlab=mod,ylab="VO2max") #Plot the results
+  abline(lmTemp) #Add a regression line
+  # print(summary(lmTemp))
+  models[[mod]] <- c(summary(lmTemp)$adj.r.squared,summary(lmTemp)$coefficients[2,4])
+}
+```
+
+
+```{r}
+models
+```
+
+* Model with all variables
+
+```{r}
+md <- paste("VO2max ~ ",paste(names(models)[1:3],collapse="+"),sep = "")
+lmTemp = lm(md, data = ath.superpreds) #Create the linear regression
+plot(ath.superpreds[[mod]],ath.superpreds$VO2max, pch = 16, col = "blue",xlab=mod,ylab="VO2max") #Plot the results
+abline(lmTemp) #Add a regression line
+# print(summary(lmTemp))
+models$ALL <- c(summary(lmTemp)$adj.r.squared,summary(lmTemp)$coefficients[2,4])
+summary(lmTemp)
+models
+```
+
+
+
+
+
