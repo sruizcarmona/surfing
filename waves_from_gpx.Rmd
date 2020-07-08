@@ -1,0 +1,250 @@
+  ---
+title: "Training Peaks"
+output:
+  html_notebook:
+    toc: true
+    toc_depth: 3
+    toc_float:
+      collapsed: false
+      smooth_scroll: true
+    theme: cosmo
+    df_print: paged
+    highlight: tango
+    code_folding: hide
+    # fig_width: 12
+    # fig_height: 12
+# output:
+#   epuRate::BAKER:
+#     toc: TRUE
+#     number_sections: FALSE
+#     code_folding: "show"
+---
+
+<script>
+$(document).ready(function() {
+  $items = $('div#TOC li');
+  $items.each(function(idx) {
+    num_ul = $(this).parentsUntil('#TOC').length;
+    $(this).css({'text-indent': num_ul * 10, 'padding-left': 0});
+  });
+
+});
+</script>
+
+***
+
+# TrainingPeaks Data
+
+## Preliminary tasks
+### Load Libraries
+
+Load libraries for reading fit data and create maps and plots.
+
+```{r warning=FALSE, results='hide', echo=F}
+# library(fit)
+library(ggplot2)
+library(leaflet)
+library(dplyr)
+library(cetcolor)
+library(XML)
+library(tidyr)
+library(geosphere)
+library(zoo)
+library(RColorBrewer)
+```
+
+
+Read GPX file
+
+```{r}
+# load function
+# https://rdrr.io/cran/plotKML/src/R/readGPX.R
+source("readGPX.R")
+```
+
+```{r}
+# read file
+gpx <- readGPX("data/surfing.GPX")
+# gpx <- readGPX("data/surfing_strava.gpx")
+gpx <- gpx$tracks[[1]][[1]]
+gpx
+```
+
+```{r}
+# create variables with day and time
+# ztime <- format(as.POSIXct(gpx$time[1],format="%Y-%m-%dT%H:%M:%S.000Z",tz="UTC"),tz="Australia/Melbourne")
+# format(ztime)
+### POLAR
+gpx <- gpx %>%
+  mutate(date=format(as.POSIXct(time,format="%Y-%m-%dT%H:%M:%S.000Z",tz="UTC"),tz="Australia/Melbourne"),
+         day=format(as.POSIXct(date),"%y%m%d"),
+         timeofday=format(as.POSIXct(date),"%H:%M:%S"),
+         time=as.POSIXct(time,format="%Y-%m-%dT%H:%M:%S.000Z",tz="UTC")) %>%
+  select(-date,-ele,-day)
+### strava
+# gpx <- gpx %>%
+#   mutate(date=format(as.POSIXct(time,format="%Y-%m-%dT%H:%M:%SZ",tz="UTC"),tz="Australia/Melbourne"),
+#          day=format(as.POSIXct(date),"%y%m%d"),
+#          timeofday=format(as.POSIXct(date),"%H:%M:%S"),
+#          time=as.POSIXct(time,format="%Y-%m-%dT%H:%M:%SZ",tz="UTC")) %>%
+#   select(-date,-ele,-day)
+# gpx
+```
+
+```{r}
+# get distance and remove the steps with 0
+gpx <- gpx %>% 
+  mutate(laglon=lag(lon),
+         laglat=lag(lat)) %>% 
+  rowwise() %>%
+  mutate(step_distance=distm(c(lon,lat),c(laglon,laglat),fun=distHaversine)) %>% 
+  ungroup() %>% 
+  mutate(step_distance=as.numeric(step_distance),
+         cum_distance=round(cumsum(replace_na(step_distance,0)),2)) %>% 
+  select(-laglon,-laglat) %>% 
+  filter(step_distance != 0)
+
+# get step time
+gpx <- gpx %>% 
+  mutate(step_s=as.numeric(time-lag(time)),
+         step_s=case_when(
+           is.na(step_s) ~ 1,
+           step_s > 15 | lag(step_s,n=1) > 15 | lag(step_s,n=2) > 15 | lag(step_s,n=3) > 15  ~ rollmean(x=step_s,4,align="right",fill=NA),
+           step_s > 10 | lag(step_s,n=1) > 10 | lag(step_s,n=2) > 10 ~ rollmean(x=step_s,3,align="right",fill=NA),
+           step_s > 5 | lag(step_s,n=1) > 5 | lag(step_s,n=2) > 5 ~ rollmean(x=step_s,2,align="right",fill=NA),
+           TRUE ~ round(step_s,2)
+         ),
+         cum_s=cumsum(replace_na(step_s,0)),
+         cum_min=round(cum_s/60,2))
+```
+
+
+```{r}
+# speed
+gpx <- gpx %>% 
+  mutate(speed.raw=(step_distance/1000)/(step_s/3600),
+         speed=case_when(
+           row_number() <= 10 ~ rollmean(x=speed.raw,10,align="left",fill=NA),
+           TRUE ~ rollmean(x=speed.raw,10,align="right",fill=NA))
+         )
+plot(gpx$cum_distance,gpx$speed,type="l")
+gpx
+```
+
+```{r}
+wave <- gpx %>% slice(c(1:500)) %>% select(-speed.raw,-time,-step_distance)
+
+min.speed <- 7
+min.speedmax <- 13
+max.speed <- 40 # for speed errors with GPS
+min.length <- 6
+
+wave <- gpx %>% 
+  # slice(c(1600:1800)) %>% select(-speed.raw,-time,-step_distance) %>%
+  mutate(wave.speed = ifelse(speed > min.speed,1,0)) %>% 
+  mutate(wave.length = ifelse(wave.speed == 1 &
+           (lag(wave.speed,n=5,default=0)+
+           lag(wave.speed,n=4,default=0)+
+           lag(wave.speed,n=3,default=0)+
+           lag(wave.speed,n=2,default=0)+
+           lag(wave.speed,n=1,default=0)+
+           wave.speed+
+           lead(wave.speed,n=1,default=0)+
+           lead(wave.speed,n=2,default=0)+
+           lead(wave.speed,n=3,default=0)+
+           lead(wave.speed,n=4,default=0)+
+           lead(wave.speed,n=5,default=0)) >= min.length,
+           1,0)) %>%
+  mutate(wave.n = ifelse(wave.speed != lag(wave.speed,default=0) & wave.speed == 1 & wave.length == 1,1,0)) %>%
+  mutate(wave.n = ifelse(wave.speed == 1 & wave.length == 1,cumsum(replace_na(wave.n,0)),0)) %>%
+  # filter(wave.speed !=0) %>% 
+  group_by(wave.speed,wave.length,wave.n) %>%
+  mutate(wave.speedcheck = case_when(
+    any(wave.speed == 1 & wave.length==1 & speed > min.speedmax) & !any(speed.raw > max.speed & speed > min.speedmax) ~ 1,
+    # any(wave.speed == 1 & wave.length==1 & speed > min.speedmax) ~ 1,
+    TRUE ~ 0)) %>%
+  ungroup() %>%
+  mutate(wave.n = ifelse(wave.speed != lag(wave.speed,default=0) & wave.speed == 1 & wave.length == 1 & wave.speedcheck == 1,1,0)) %>%
+  mutate(wave.n = ifelse(wave.speed == 1 & wave.length == 1 & wave.speedcheck == 1,cumsum(replace_na(wave.n,0)),0)) %>%
+  data.frame()
+wave
+# wave <- wave %>% filter(wave.n != 0)
+# wave
+max(wave$wave.n)
+# plot(wave$cum_distance,wave$speed,type="l")
+```
+
+```{r}
+wave %>%filter(wave.n != 0)
+```
+
+################################
+################################
+
+*** 
+
+```{r fig.width = 6}
+# pdata <- with(data$record, data.frame(alt = altitude, time = (distance-distance[1])/1000,
+#                                       pow = power, hr=heart_rate, speed=speed, cad=cadence))
+# pdata <- pdata[-(1:10),]
+# pdata$grad <- with(data$record, 100 * diff(altitude,lag=10) / diff(distance,lag=10))
+mycols <- c("#000000",brewer.pal(n = 8, name = "Dark2"))
+ggplot(wave, aes(y=speed, x=cum_distance, color=factor(wave.n))) +
+  geom_line(color="black") +
+  geom_line() +
+  # breaks = seq(0, 1000, by = 200)) +
+  # scale_x_continuous(breaks= seq(0, 70, by = 10)) +
+  ggtitle("Distance vs All") +
+  xlab("Distance (km)") +
+  ylab("Altitude (m)") +
+  scale_colour_manual(values=mycols) +
+  # scale_colour_manual(values = c("black", "purple","orange","red","blue","green")) +
+  labs(y = "Speed (km/h)",
+       x = "Distance (m)",
+       colour = "Wave") +
+  theme_minimal() +
+  # theme(legend.position = c(0.9, 0.93))
+  theme(legend.position = "right")
+```
+
+
+### Activity Maps
+
+Convert time to minutes and add direction (Outbound vs Return):
+ 
+```{r}
+points <- wave %>% select(lat,lon,speed,wave.n) %>%  filter(wave.n != 0)
+# points$time_min  <- with(points, timestamp - timestamp[1])/60 # minutes of riding
+```
+
+```{r}
+# library(leaflet)
+leaflet(points) %>% addTiles() %>% addPolylines(~lon,~lat)
+```
+
+#### Map with HR
+
+The darker the colour, the higher the HR is:
+
+```{r}
+# newcols <- rev(cet_pal(min(dim(points)[1],256),name="l3"))
+points1 <- points %>%
+  group_by(wave.n) %>% 
+  mutate(nextLat = lead(lat),
+         nextLng = lead(lon),
+  ) %>% 
+  ungroup() %>% 
+  mutate(color=mycols[-1][as.factor(wave.n)])
+# points1
+gradient_map <- leaflet() %>%
+ addTiles()
+for (i in 1:nrow(points1)) {
+ gradient_map <- addPolylines(map = gradient_map,
+                              data = points1,
+                              lng = as.numeric(points1[i, c('lon', 'nextLng')]),
+                              lat = as.numeric(points1[i, c('lat', 'nextLat')]),
+                              color = as.character(points1[i, c('color')])
+ )
+}
+gradient_map
+```
