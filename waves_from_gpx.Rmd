@@ -236,15 +236,99 @@ points1 <- points %>%
   ungroup() %>% 
   mutate(color=mycols[-1][as.factor(wave.n)])
 # points1
+# ProviderTiles
+# https://leaflet-extras.github.io/leaflet-providers/preview/index.html
 gradient_map <- leaflet() %>%
- addTiles()
+  # addTiles() 
+  addProviderTiles(providers$Stamen.Watercolor) %>%
+  addProviderTiles(providers$Stamen.TonerHybrid)
 for (i in 1:nrow(points1)) {
- gradient_map <- addPolylines(map = gradient_map,
-                              data = points1,
-                              lng = as.numeric(points1[i, c('lon', 'nextLng')]),
-                              lat = as.numeric(points1[i, c('lat', 'nextLat')]),
-                              color = as.character(points1[i, c('color')])
- )
+  gradient_map <- addPolylines(map = gradient_map,
+                               data = points1,
+                               opacity = 1,
+                               weight=8,
+                               # polyline = 'route',
+                               # smoothFactor = 0,
+                               lng = as.numeric(points1[i, c('lon', 'nextLng')]),
+                               lat = as.numeric(points1[i, c('lat', 'nextLat')]),
+                               color = as.character(points1[i, c('color')])
+  )
 }
+
 gradient_map
 ```
+
+```{r}
+start <- points1 %>% group_by(wave.n) %>% filter(row_number() == 1)
+end <- points1 %>% group_by(wave.n) %>% mutate(lat=last(lat),lon=last(lon)) %>% filter(row_number() == 1)
+
+testmap <- gradient_map %>% setView(start[1,'lon'],start[1,'lat'],zoom=15)
+for (i in 1:nrow(start)) {
+  testmap <- addCircleMarkers(map=testmap,
+                        lng=as.numeric(end[i,'lon']),
+                        lat=as.numeric(end[i,'lat']),
+                        weight = 2, radius= 5,
+                        opacity=1,
+                        fillColor='black',
+                        fillOpacity = 0.2,
+                        color='black'
+  )
+  testmap <- addCircleMarkers(map=testmap,
+                              lng=as.numeric(start[i,'lon']),
+                              lat=as.numeric(start[i,'lat']),
+                              weight = 2, radius= 5,
+                              opacity=1,
+                              fillColor='white',
+                              fillOpacity = 0.7,
+                              color='black', label=i,
+                              labelOptions = labelOptions(noHide = T, textOnly = T,sticky=F,direction="right",
+                                                          textsize = "20px", offset = c(5,0),
+                                                          style=list(
+                                                            "font-weight"="bold"
+                                                          ))
+  )
+}
+wave1 <- points1 %>% filter(wave.n == 1)
+# testmap <- addPolylines(testmap,lng=wave1$lon+0.001,lat=wave1$lat+0.001,color='black',opacity=1,weight = 7)
+testmap
+```
+
+
+# Get summary of waves per session
+
+```{r}
+session <- gpx %>% 
+  mutate(time = format(as.POSIXct(time,format="%Y-%m-%dT%H:%M:%S.000Z",tz="UTC"),tz="Australia/Melbourne","%y/%m/%d-%H:%M")) %>% 
+  filter(row_number() == 1) %>% 
+  select(time)
+# time <- format(as.POSIXct(gpx$time[1],format="%Y-%m-%dT%H:%M:%S.000Z",tz="UTC"),tz="Australia/Melbourne","%y/%m/%d-%H:%M")
+session$nwaves <- max(wave$wave.n)
+session$totaltime <- as.numeric(gpx %>% summarise(totaltime=as.numeric(difftime(last(time),first(time),units = "mins"))) )
+session$waitingtime_waves <- session$totaltime / session$nwaves
+# time per wave
+session$maxtime_singlewave <- max(wave %>% 
+  filter(wave.n != 0) %>% 
+  group_by(wave.n) %>% 
+  summarise(wave.time = last(cum_s)-first(cum_s), .groups='drop') %>% 
+  select(wave.time))
+session$totaltime_allwaves <- sum(wave %>% 
+  filter(wave.n != 0) %>% 
+  group_by(wave.n) %>% 
+  summarise(wave.time = last(cum_s)-first(cum_s), .groups='drop') %>% 
+  select(wave.time))
+session$averagetime_allwaves <- round(session$totaltime_allwaves / session$nwaves,1)
+# distance per wave
+session$maxdist_singlewave <- max(wave %>% 
+  filter(wave.n != 0) %>% 
+  group_by(wave.n) %>% 
+  summarise(wave.x= last(cum_distance)-first(cum_distance), .groups='drop') %>% 
+  select(wave.x))
+session$totaldist_allwaves <- sum(wave %>% 
+  filter(wave.n != 0) %>% 
+  group_by(wave.n) %>% 
+  summarise(wave.x = last(cum_distance)-first(cum_distance), .groups='drop') %>% 
+  select(wave.x))
+session$averagedist_allwaves <- round(session$totaldist_allwaves / session$nwaves,1)
+session
+```
+
