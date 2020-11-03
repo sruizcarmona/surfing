@@ -1,60 +1,80 @@
-  ---
-title: "Training Peaks"
+---
+title: "Surfing"
 output:
-  html_notebook:
-    toc: true
-    toc_depth: 3
-    toc_float:
-      collapsed: false
-      smooth_scroll: true
+  flexdashboard::flex_dashboard:
+    vertical_layout: fill
+    orientation: rows
     theme: cosmo
-    df_print: paged
-    highlight: tango
-    code_folding: hide
-    # fig_width: 12
-    # fig_height: 12
-# output:
-#   epuRate::BAKER:
-#     toc: TRUE
-#     number_sections: FALSE
-#     code_folding: "show"
+    includes:
+        in_header: src/g.analytics.htm
 ---
 
-<script>
-$(document).ready(function() {
-  $items = $('div#TOC li');
-  $items.each(function(idx) {
-    num_ul = $(this).parentsUntil('#TOC').length;
-    $(this).css({'text-indent': num_ul * 10, 'padding-left': 0});
-  });
+<style>                     
+<!-- .value-box .icon .fa { -->
+<!-- font-size: 180%; -->
+<!-- color: rgba(255, 255, 255, 0.8); -->
+<!-- top: 7px; -->
+<!-- } -->
+<!-- .value-box .value { -->
+<!-- font-size: 23px; -->
+<!-- margin: -5px 0 3px 0; -->
+<!-- } -->
+<!-- .value-box h6 { -->
+<!-- font-size: 20px; -->
+<!-- font-weight: bold; -->
+<!-- margin-top: -8px; -->
+<!-- } -->
+<!-- .r0 { -->
+<!-- margin-right: 72%; -->
+<!-- } -->
+<!-- .r1right { -->
+<!-- margin-right: 43.4%; -->
+<!-- } -->
+<!-- h3 { -->
+<!-- font-size:19px; -->
+<!-- margin-right: 20px; -->
+<!-- margin-top: 10.5px; -->
+<!-- margin-bottom: 10.5px; -->
+<!-- display: block; -->
+<!-- font-weight: bold; -->
+<!-- font-family: "Source Sans Pro",Calibri,Candara,Arial,sans-serif; -->
+<!-- line-height: 1.1; -->
+<!-- color: inherit; -->
+<!-- } -->
+<!-- .navbar{ -->
+<!--   visibility: hidden -->
+<!-- } -->
+<!-- body { -->
+<!--     padding-top: 10px; -->
+<!-- } -->
 
-});
-</script>
+.section.sidebar {
+  top: 61px;
+  border-bottom: 10px solid #ececec;
+  border-left: 10px solid #ececec;
+  background-color: rgba(255, 255, 255, 1);
+}
 
-***
+<!-- #map{ -->
+<!--   position: absolute; -->
+<!--   top: 0; -->
+<!--   bottom: 0; -->
+<!--   width: 100%; -->
+<!-- } -->
+</style>
 
-# TrainingPeaks Data
 
-## Preliminary tasks
-### Load Libraries
-
-Load libraries for reading fit data and create maps and plots.
-
-```{r warning=FALSE, results='hide', echo=F}
-# library(fit)
-library(ggplot2)
-library(leaflet)
-library(dplyr)
-library(cetcolor)
-library(XML)
-library(tidyr)
-library(geosphere)
+```{r message=FALSE, warning=FALSE}
+library(tidyverse)
+library(RColorBrewer)
+library(flexdashboard)
+library(shiny)
 library(zoo)
+library(leaflet)
+library(XML)
+library(geosphere)
 library(RColorBrewer)
 ```
-
-
-Read GPX file
 
 ```{r}
 # load function
@@ -65,31 +85,16 @@ source("src/readGPX.R")
 ```{r}
 # read file
 gpx <- readGPX("data/surfing.GPX")
-# gpx <- readGPX("~/Desktop/PERSONAL/Zumaia_Surf.gpx")
-# gpx <- readGPX("data/surfing_strava.gpx")
 gpx <- gpx$tracks[[1]][[1]]
-gpx
 ```
 
 ```{r}
-# create variables with day and time
-# ztime <- format(as.POSIXct(gpx$time[1],format="%Y-%m-%dT%H:%M:%S.000Z",tz="UTC"),tz="Australia/Melbourne")
-# format(ztime)
-### POLAR
 gpx <- gpx %>%
   mutate(date=format(as.POSIXct(time,format="%Y-%m-%dT%H:%M:%S.000Z",tz="UTC"),tz="Australia/Melbourne"),
          day=format(as.POSIXct(date),"%y%m%d"),
          timeofday=format(as.POSIXct(date),"%H:%M:%S"),
          time=as.POSIXct(time,format="%Y-%m-%dT%H:%M:%S.000Z",tz="UTC")) %>%
   select(-date,-ele,-day)
-### strava
-# gpx <- gpx %>%
-#   mutate(date=format(as.POSIXct(time,format="%Y-%m-%dT%H:%M:%SZ",tz="UTC"),tz="Australia/Melbourne"),
-#          day=format(as.POSIXct(date),"%y%m%d"),
-#          timeofday=format(as.POSIXct(date),"%H:%M:%S"),
-#          time=as.POSIXct(time,format="%Y-%m-%dT%H:%M:%SZ",tz="UTC")) %>%
-#   select(-date,-ele,-day)
-# gpx
 ```
 
 ```{r}
@@ -128,8 +133,6 @@ gpx <- gpx %>%
            row_number() <= 10 ~ rollmean(x=speed.raw,10,align="left",fill=NA),
            TRUE ~ rollmean(x=speed.raw,10,align="right",fill=NA))
          )
-plot(gpx$cum_distance,gpx$speed,type="l")
-gpx
 ```
 
 ```{r}
@@ -141,7 +144,6 @@ max.speed <- 40 # for speed errors with GPS
 min.length <- 6
 
 wave <- gpx %>% 
-  # slice(c(1600:1800)) %>% select(-speed.raw,-time,-step_distance) %>%
   mutate(wave.speed = ifelse(speed > min.speed,1,0)) %>% 
   mutate(wave.length = ifelse(wave.speed == 1 &
            (lag(wave.speed,n=5,default=0)+
@@ -168,64 +170,17 @@ wave <- gpx %>%
   mutate(wave.n = ifelse(wave.speed != lag(wave.speed,default=0) & wave.speed == 1 & wave.length == 1 & wave.speedcheck == 1,1,0)) %>%
   mutate(wave.n = ifelse(wave.speed == 1 & wave.length == 1 & wave.speedcheck == 1,cumsum(replace_na(wave.n,0)),0)) %>%
   data.frame()
-wave
+# wave
 # wave <- wave %>% filter(wave.n != 0)
 # wave
-max(wave$wave.n)
+# max(wave$wave.n)
 # plot(wave$cum_distance,wave$speed,type="l")
 ```
 
 ```{r}
-wave %>%filter(wave.n != 0)
-```
-
-################################
-################################
-
-*** 
-
-```{r fig.width = 6}
-# pdata <- with(data$record, data.frame(alt = altitude, time = (distance-distance[1])/1000,
-#                                       pow = power, hr=heart_rate, speed=speed, cad=cadence))
-# pdata <- pdata[-(1:10),]
-# pdata$grad <- with(data$record, 100 * diff(altitude,lag=10) / diff(distance,lag=10))
 mycols <- c("#000000",brewer.pal(n = 8, name = "Dark2"))
-ggplot(wave, aes(y=speed, x=cum_distance, color=factor(wave.n))) +
-  geom_line(color="black") +
-  geom_line() +
-  # breaks = seq(0, 1000, by = 200)) +
-  # scale_x_continuous(breaks= seq(0, 70, by = 10)) +
-  ggtitle("Distance vs All") +
-  xlab("Distance (km)") +
-  ylab("Altitude (m)") +
-  scale_colour_manual(values=mycols) +
-  # scale_colour_manual(values = c("black", "purple","orange","red","blue","green")) +
-  labs(y = "Speed (km/h)",
-       x = "Distance (m)",
-       colour = "Wave") +
-  theme_minimal() +
-  # theme(legend.position = c(0.9, 0.93))
-  theme(legend.position = "right")
-```
-
-
-### Activity Maps
-
-Convert time to minutes and add direction (Outbound vs Return):
- 
-```{r}
 points <- wave %>% select(lat,lon,speed,wave.n) %>%  filter(wave.n != 0)
-# points$time_min  <- with(points, timestamp - timestamp[1])/60 # minutes of riding
 ```
-
-```{r}
-# library(leaflet)
-leaflet(points) %>% addTiles() %>% addPolylines(~lon,~lat)
-```
-
-#### Map with HR
-
-The darker the colour, the higher the HR is:
 
 ```{r}
 # newcols <- rev(cet_pal(min(dim(points)[1],256),name="l3"))
@@ -239,7 +194,7 @@ points1 <- points %>%
 # points1
 # ProviderTiles
 # https://leaflet-extras.github.io/leaflet-providers/preview/index.html
-gradient_map <- leaflet() %>%
+gradient_map <- leaflet(width="100%") %>%
   addTiles()
   # addProviderTiles(providers$Stamen.Watercolor) %>%
   # addProviderTiles(providers$Stamen.TonerHybrid) %>% 
@@ -256,8 +211,6 @@ for (i in 1:nrow(points1)) {
                                color = as.character(points1[i, c('color')])
   )
 }
-
-gradient_map
 ```
 
 ```{r}
@@ -291,12 +244,8 @@ for (i in 1:nrow(start)) {
   )
 }
 wave1 <- points1 %>% filter(wave.n == 1)
-# testmap <- addPolylines(testmap,lng=wave1$lon+0.001,lat=wave1$lat+0.001,color='black',opacity=1,weight = 7)
-testmap
 ```
 
-
-# Get summary of waves per session
 
 ```{r}
 session <- gpx %>% 
@@ -308,36 +257,135 @@ session$nwaves <- max(wave$wave.n)
 session$totaltime.min <- gpx %>% 
   summarise(totaltime=as.numeric(difftime(last(time),first(time),units = "mins"))) %>% 
   as.numeric() %>% round(1)
-session$frequency_waves.min <- round(session$totaltime.min / session$nwaves,1)
+session$frequency_waves.min <- round(session$totaltime.min / session$nwaves,0)
 # time per wave
 session$maxtime_singlewave.s <- max(wave %>% 
   filter(wave.n != 0) %>% 
   group_by(wave.n) %>% 
   summarise(wave.time = last(cum_s)-first(cum_s), .groups='drop') %>% 
   select(wave.time)) %>% 
-  round(2)
+  round(1)
 session$totaltime_allwaves.s <- sum(wave %>% 
   filter(wave.n != 0) %>% 
   group_by(wave.n) %>% 
   summarise(wave.time = last(cum_s)-first(cum_s), .groups='drop') %>% 
-  select(wave.time))
-session$averagetime_allwaves.s <- round(session$totaltime_allwaves.s / session$nwaves,1)
+  select(wave.time)) %>% 
+  round(1)
+session$averagetime_allwaves.s <- round(session$totaltime_allwaves.s / session$nwaves,0)
 # distance per wave
 session$maxdist_singlewave.m <- max(wave %>% 
   filter(wave.n != 0) %>% 
   group_by(wave.n) %>% 
   summarise(wave.x= last(cum_distance)-first(cum_distance), .groups='drop') %>% 
-  select(wave.x))
+  select(wave.x)) %>% 
+  round(0)
 session$totaldist_allwaves.m <- sum(wave %>% 
   filter(wave.n != 0) %>% 
   group_by(wave.n) %>% 
   summarise(wave.x = last(cum_distance)-first(cum_distance), .groups='drop') %>% 
-  select(wave.x))
-session$averagedist_allwaves.m <- round(session$totaldist_allwaves.m / session$nwaves,1)
-session
+  select(wave.x)) %>% 
+  round(0)
+session$averagedist_allwaves.m <- round(session$totaldist_allwaves.m / session$nwaves,0)
+# session
 ```
 
+# Session 1
+<!-- ################ WEBSITE SETUP ############## -->
+<!-- icons from https://fontawesome.com/icons?d=gallery&v=5.0.0&m=free -->
+
+Column {.sidebar data-width=800 data-padding=10}
+-------------------------------------
+
+### 
+
+```{r}
+testmap
+```
+
+Row {data-height=100}
+-------------------------------------
+
+### Duration
+
+```{r}
+valueBox(
+  value=paste(session$totaltime.min,"min")
+)
+```
+
+### Total Waves
+
+```{r}
+valueBox(
+  value=session$nwaves,
+)
+```   
+
+Row {data-height=60}
+-------------------------------------
+
+### One wave every...
+
+```{r}
+valueBox(
+  value=paste(session$frequency_waves.min,"min")
+)
+```   
+
+Row {data-height=70}
+-------------------------------------
+
+### Wave distance (max)
+
+```{r}
+valueBox(
+  value=paste(session$maxdist_singlewave.m,"m")
+)
+```  
+
+### Wave distance (avg)
+
+```{r}
+valueBox(
+  value=paste(session$averagedist_allwaves.m,"m")
+)
+```  
+
+### Wave distance (total)
+
+```{r}
+valueBox(
+  value=paste(session$totaldist_allwaves.m,"m")
+)
+```  
+
+Row {data-height=70}
+--------------------
+
+### Wave duration (max)
+
+```{r}
+valueBox(
+  value=paste0(session$maxtime_singlewave.s,"\"")
+)
+```  
+
+### Wave duration (avg)
+
+```{r}
+valueBox(
+  value=paste0(session$averagetime_allwaves.s,"\"")
+)
+```  
+
+### Wave duration (total)
+
+```{r}
+valueBox(
+  value=paste0(session$totaltime_allwaves.s,"\"")
+)
+```  
 
 
-#####
+<!-- ##### Created by [\@RuizCSergio](http://twitter.com/RuizCSergio) -->
 
