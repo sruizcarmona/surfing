@@ -86,15 +86,25 @@ source("src/readGPX.R")
 # read file
 #gpx <- readGPX("data/surfing.GPX")
 gpx <- readGPX("data/surf_gunnamata_201115.gpx")
+gpx <- readGPX("SURFING_POLAR/surfing_polar_2021-10-26T15-00-19.gpx")
 gpx <- gpx$tracks[[1]][[1]]
 ```
 
 ```{r}
 gpx <- gpx %>%
-  mutate(date=format(as.POSIXct(time,format="%Y-%m-%dT%H:%M:%SZ",tz="UTC"),tz="Australia/Melbourne"),
+  mutate(date=ifelse(is.na(format(as.POSIXct(time,format="%Y-%m-%dT%H:%M:%SZ",tz="UTC"),
+                                  tz="Australia/Melbourne")),
+                     format(as.POSIXct(time,format="%Y-%m-%dT%H:%M:%S.000Z",tz="UTC"),
+                            tz="Australia/Melbourne"),
+                     format(as.POSIXct(time,format="%Y-%m-%dT%H:%M:%SZ",tz="UTC"),
+                            tz="Australia/Melbourne")),
          day=format(as.POSIXct(date),"%y%m%d"),
          timeofday=format(as.POSIXct(date),"%H:%M:%S"),
-         time=as.POSIXct(time,format="%Y-%m-%dT%H:%M:%SZ",tz="UTC")) %>%
+         time_posix = time, 
+         time=ifelse(is.na(as.POSIXct(time,format="%Y-%m-%dT%H:%M:%SZ",tz="UTC")),
+                     as.POSIXct(time,format="%Y-%m-%dT%H:%M:%S.000Z",tz="UTC"),
+                     as.POSIXct(time,format="%Y-%m-%dT%H:%M:%SZ",tz="UTC"))
+                           ) %>%
   select(-date,-ele,-day)
 ```
 
@@ -131,16 +141,23 @@ gpx <- gpx %>%
 gpx <- gpx %>% 
   mutate(speed.raw=(step_distance/1000)/(step_s/3600),
          speed=case_when(
-           row_number() <= 10 ~ rollmean(x=speed.raw,10,align="left",fill=NA),
-           TRUE ~ rollmean(x=speed.raw,10,align="right",fill=NA))
+           row_number() <= 10 ~ rollmean(x=speed.raw, 5, align="left",fill=NA),
+           TRUE ~ rollmean(x=speed.raw, 5,  align="right",fill=NA))
          )
 ```
 
 ```{r}
-wave <- gpx %>% slice(c(1:500)) %>% select(-speed.raw,-time,-step_distance)
+wave <- gpx %>% 
+  # slice(c(1:500)) %>% 
+  select(-speed.raw,-time, -time_posix, -step_distance)
 
 min.speed <- 7
 min.speedmax <- 13
+max.speed <- 40 # for speed errors with GPS
+min.length <- 6
+# #urbnsurf settings
+min.speed <- 7
+min.speedmax <- 11
 max.speed <- 40 # for speed errors with GPS
 min.length <- 6
 
@@ -180,6 +197,7 @@ wave <- gpx %>%
 
 ```{r}
 mycols <- c("#000000",brewer.pal(n = 8, name = "Dark2"))
+mycols <- c("#000000",rainbow(max(wave$wave.n)))
 points <- wave %>% select(lat,lon,speed,wave.n) %>%  filter(wave.n != 0)
 ```
 
@@ -250,14 +268,18 @@ wave1 <- points1 %>% filter(wave.n == 1)
 
 ```{r}
 session <- gpx %>% 
-  mutate(time = format(as.POSIXct(time,format="%Y-%m-%dT%H:%M:%S.000Z",tz="UTC"),tz="Australia/Melbourne","%y/%m/%d-%H:%M")) %>% 
+  mutate(time = format(as.POSIXct(time_posix,format="%Y-%m-%dT%H:%M:%S.000Z",tz="UTC"),
+                       tz="Australia/Melbourne","%y/%m/%d-%H:%M")) %>% 
   filter(row_number() == 1) %>% 
   select(time)
 # time <- format(as.POSIXct(gpx$time[1],format="%Y-%m-%dT%H:%M:%S.000Z",tz="UTC"),tz="Australia/Melbourne","%y/%m/%d-%H:%M")
 session$nwaves <- max(wave$wave.n)
+# session$totaltime.min <- gpx %>% 
+#   summarise(totaltime=as.numeric(difftime(last(time),first(time),units = "mins"))) %>% 
+#   as.numeric() %>% round(1)
 session$totaltime.min <- gpx %>% 
-  summarise(totaltime=as.numeric(difftime(last(time),first(time),units = "mins"))) %>% 
-  as.numeric() %>% round(1)
+  summarise(totaltime = round(as.numeric(last(time) - first(time))/60,1)) %>% 
+  as.numeric()
 session$frequency_waves.min <- round(session$totaltime.min / session$nwaves,0)
 # time per wave
 session$maxtime_singlewave.s <- max(wave %>% 
@@ -287,7 +309,7 @@ session$totaldist_allwaves.m <- sum(wave %>%
   select(wave.x)) %>% 
   round(0)
 session$averagedist_allwaves.m <- round(session$totaldist_allwaves.m / session$nwaves,0)
- session
+ # session
 ```
 
 # Session 1
