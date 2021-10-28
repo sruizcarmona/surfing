@@ -84,16 +84,17 @@ source("src/readGPX.R")
 
 ```{r}
 # read file
-gpx <- readGPX("data/surfing.GPX")
+#gpx <- readGPX("data/surfing.GPX")
+gpx <- readGPX("data/surf_gunnamata_201115.gpx")
 gpx <- gpx$tracks[[1]][[1]]
 ```
 
 ```{r}
 gpx <- gpx %>%
-  mutate(date=format(as.POSIXct(time,format="%Y-%m-%dT%H:%M:%S.000Z",tz="UTC"),tz="Australia/Melbourne"),
+  mutate(date=format(as.POSIXct(time,format="%Y-%m-%dT%H:%M:%SZ",tz="UTC"),tz="Australia/Melbourne"),
          day=format(as.POSIXct(date),"%y%m%d"),
          timeofday=format(as.POSIXct(date),"%H:%M:%S"),
-         time=as.POSIXct(time,format="%Y-%m-%dT%H:%M:%S.000Z",tz="UTC")) %>%
+         time=as.POSIXct(time,format="%Y-%m-%dT%H:%M:%SZ",tz="UTC")) %>%
   select(-date,-ele,-day)
 ```
 
@@ -286,7 +287,7 @@ session$totaldist_allwaves.m <- sum(wave %>%
   select(wave.x)) %>% 
   round(0)
 session$averagedist_allwaves.m <- round(session$totaldist_allwaves.m / session$nwaves,0)
-# session
+ session
 ```
 
 # Session 1

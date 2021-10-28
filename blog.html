@@ -1,0 +1,38 @@
+<html>
+  <head>
+    <title>Mapping my runs</title>
+  </head>
+
+  <body>
+    <script src="http://cdn.leafletjs.com/leaflet-0.7/leaflet.js"></script>
+    <script type="text/javascript" src="https://rawgit.com/jieter/Leaflet.encoded/master/Polyline.encoded.js"></script>
+    <link rel="stylesheet" href="http://cdn.leafletjs.com/leaflet-0.7/leaflet.css" />
+    <div id="map" style="width: 100%; height: 100%"></div>
+
+    <script>
+    var map = L.map('map').setView([55.609818, 13.003286], 13);
+    L.tileLayer(
+        'http://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+            maxZoom: 18,
+        }).addTo(map);
+
+    var encodedRoutes = [
+      "v``eFefesZCAH?LLCUGG_@k@u@q@KEFA@HAGCHGV?p@JVDDHB@GRADCICL@JHDA@BXFL?@@LABEIIIAOOa@Oq@q@_@KAHBXDPCLDJb@PJ?HCFB?@@CFADLZFIG@HCJ@EMMCMWUYc@MUWSFEEP?P@N?XNXFCXD?CA?FAAGJVf@H?C?DBDBSCO?HC@@PAEC@?CG?BU]Ys@_AGQ@G?DEDMn@DNHJDBDH`@P^FFJ@FLAEEOCJIF?BBGJJOACg@[KMs@o@YMS?EF?PRVNLVFJHz@b@D?E?MJ@GGAB@MJSXTUZFHUA_@CKGAMk@GKOOUIMMGDGJCJ?F@J\\v@BDLALFJ@CIGEA?DFVJDJP@aBsB@AIPMFGP@D^\\J@LNNBHJP@EQNFFHD?Me@EFMG{@aA_@MO?C@LTh@f@FNJF?@DHL@XCPZFA@@BC@@QWOCKGKMKSUMUWKEGDANHTBR?AB?LDNLTBNJLLBXFY@AFFDICAEBGAACNXPIH@QCGEUSQ]i@a@OGWEABd@~@@EfA\\E?JGARBBPCEGm@_@UWS_@MIKAFNADBXLNDPBCD@?CDLLHHHGBDCF[ABXCA@F^LB@Ic@k@k@a@UMc@]dB`BEB?A@DH?DACGK@KYu@y@_@OACFJBh@FP?JLN@HD@DDBGFFJ@?BHDHHFAKi@@?DJBC?@?@CA@DACSB?@RDNEBGAEMM_@O_@Gl@h@\\?CFHOAEC@IIq@e@[Y}@cA]Y?B"
+  ]
+
+    for (let encoded of encodedRoutes) {
+      var coordinates = L.Polyline.fromEncoded(encoded).getLatLngs();
+
+      L.polyline(
+          coordinates,
+          {
+              color: 'blue',
+              weight: 2,
+              opacity: .7,
+              lineJoin: 'round'
+          }
+      ).addTo(map);
+    }
+    </script>
+  </body>
+</html>

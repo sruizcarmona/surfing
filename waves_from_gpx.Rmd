@@ -53,6 +53,15 @@ library(zoo)
 library(RColorBrewer)
 ```
 
+Load functions
+
+```{r}
+smooth.data <- function(data,w){
+  sm <- rollapply(data,width=w,function(...) {mean(...,na.rm=T)},partial=T,align="center")
+  return(round(sm,2))
+}
+```
+
 
 Read GPX file
 
@@ -89,7 +98,7 @@ gpx <- gpx %>%
 #          timeofday=format(as.POSIXct(date),"%H:%M:%S"),
 #          time=as.POSIXct(time,format="%Y-%m-%dT%H:%M:%SZ",tz="UTC")) %>%
 #   select(-date,-ele,-day)
-# gpx
+gpx
 ```
 
 ```{r}
@@ -101,39 +110,62 @@ gpx <- gpx %>%
   mutate(step_distance=distm(c(lon,lat),c(laglon,laglat),fun=distHaversine)) %>% 
   ungroup() %>% 
   mutate(step_distance=as.numeric(step_distance),
+         step_distance=smooth.data(as.numeric(step_distance),10),
          cum_distance=round(cumsum(replace_na(step_distance,0)),2)) %>% 
   select(-laglon,-laglat) %>% 
   filter(step_distance != 0)
+gpx
+ggplot(gpx) +
+  # geom_line(aes(x=as.numeric(row.names(gpx)),y=step_distance.nonsm,color="stepdist")) +
+  geom_line(aes(x=as.numeric(row.names(gpx)),y=step_distance,color="stepdist"))
 
+  # geom_line(aes(x=as.numeric(row.names(gpx)),y=cum_distance))
+```
+
+
+```{r}
 # get step time
 gpx <- gpx %>% 
   mutate(step_s=as.numeric(time-lag(time)),
-         step_s=case_when(
+         step_s.2=case_when(
            is.na(step_s) ~ 1,
            step_s > 15 | lag(step_s,n=1) > 15 | lag(step_s,n=2) > 15 | lag(step_s,n=3) > 15  ~ rollmean(x=step_s,4,align="right",fill=NA),
            step_s > 10 | lag(step_s,n=1) > 10 | lag(step_s,n=2) > 10 ~ rollmean(x=step_s,3,align="right",fill=NA),
            step_s > 5 | lag(step_s,n=1) > 5 | lag(step_s,n=2) > 5 ~ rollmean(x=step_s,2,align="right",fill=NA),
            TRUE ~ round(step_s,2)
          ),
-         cum_s=cumsum(replace_na(step_s,0)),
+         step_s.sm=smooth.data(step_s,10),
+         cum_s=cumsum(replace_na(step_s.sm,0)),
          cum_min=round(cum_s/60,2))
+gpx
 ```
-
-
 ```{r}
 # speed
-gpx <- gpx %>% 
+surf <- gpx %>% 
   mutate(speed.raw=(step_distance/1000)/(step_s/3600),
+         speed.raw.2=(step_distance/1000)/(step_s.2/3600),
+         speed.raw.sm=(step_distance/1000)/(step_s.sm/3600),
          speed=case_when(
            row_number() <= 10 ~ rollmean(x=speed.raw,10,align="left",fill=NA),
-           TRUE ~ rollmean(x=speed.raw,10,align="right",fill=NA))
+           TRUE ~ rollmean(x=speed.raw,10,align="right",fill=NA)),
+         speed=smooth.data(speed.raw,20),
+         speed.sm=smooth.data(speed.raw.sm,10),
+         speed.2=smooth.data(speed.raw.2,10)
          )
-plot(gpx$cum_distance,gpx$speed,type="l")
+ggplot(surf,aes(x=cum_distance)) +
+  geom_line(aes(y=speed,color="speed")) +
+  geom_line(aes(y=speed.2,color="speed.2")) +
+  # geom_line(aes(y=speed.raw,color="speedraw")) +
+  geom_line(aes(y=speed.sm,color="speedsm")) 
+surf
+gpx <- surf %>% select(-speed.2,speed=speed.sm,-speed.sm,-starts_with("speed.raw"))
 gpx
 ```
 
+
 ```{r}
-wave <- gpx %>% slice(c(1:500)) %>% select(-speed.raw,-time,-step_distance)
+wave <- gpx %>% slice(c(1:500)) 
+# %>% select(-speed.raw,-time,-step_distance)
 
 min.speed <- 7
 min.speedmax <- 13
@@ -161,7 +193,7 @@ wave <- gpx %>%
   # filter(wave.speed !=0) %>% 
   group_by(wave.speed,wave.length,wave.n) %>%
   mutate(wave.speedcheck = case_when(
-    any(wave.speed == 1 & wave.length==1 & speed > min.speedmax) & !any(speed.raw > max.speed & speed > min.speedmax) ~ 1,
+    any(wave.speed == 1 & wave.length==1 & speed > min.speedmax) & !any(speed > max.speed & speed > min.speedmax) ~ 1,
     # any(wave.speed == 1 & wave.length==1 & speed > min.speedmax) ~ 1,
     TRUE ~ 0)) %>%
   ungroup() %>%
@@ -172,7 +204,14 @@ wave
 # wave <- wave %>% filter(wave.n != 0)
 # wave
 max(wave$wave.n)
-# plot(wave$cum_distance,wave$speed,type="l")
+library(ggthemes)
+ggplot(wave) +
+  geom_line(aes(x=cum_distance,y=speed),col="black") +
+  geom_line(aes(cum_distance, speed, col=factor(wave.n)),
+            data=function(x){x[x$wave.n > 0, ]}) +
+  # geom_line(aes(x=cum_distance,y=speed,col=factor(wave.n))) +
+  theme_few()
+plot(wave$cum_distance,wave$speed,type="l")
 ```
 
 ```{r}
