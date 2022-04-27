@@ -74,13 +74,24 @@ library(leaflet)
 library(XML)
 library(geosphere)
 library(RColorBrewer)
+library(fit)
 ```
 
 ```{r}
 # load function
 # https://rdrr.io/cran/plotKML/src/R/readGPX.R
 source("src/readGPX.R")
+source("src/readTCX.R")
 ```
+
+```{r}
+getDatefromTimestamp <- function(tstmp){
+   t <- as.POSIXct(tstmp, origin="1989-12-31",tz="UTC")
+   t <- paste0(str_replace(t, " ","T"),".000Z")
+   return(t)
+}
+```
+
 
 ```{r}
 # read file
@@ -88,6 +99,24 @@ source("src/readGPX.R")
 gpx <- readGPX("data/surf_gunnamata_201115.gpx")
 gpx <- readGPX("SURFING_POLAR/surfing_polar_2021-10-26T15-00-19.gpx")
 gpx <- gpx$tracks[[1]][[1]]
+tcx <- readTCX('data/Sergio_Ruiz_2022-04-25_11-33-04.TCX')
+fitdata <- read.fit('data/ninasurf.fit')
+# head(fitdata$record)
+gpx <- fitdata$record %>% 
+  # head() %>% 
+  select(lat=position_lat,
+         lon=position_long,
+         time = timestamp) %>% 
+  mutate(time = getDatefromTimestamp(time)) %>% 
+  drop_na()
+gpx <- tcx %>% 
+  select(lat=LatitudeDegrees,
+         lon=LongitudeDegrees,
+         time=Time) %>% 
+  drop_na()
+
+
+# head(gpx)
 ```
 
 ```{r}
@@ -105,7 +134,7 @@ gpx <- gpx %>%
                      as.POSIXct(time,format="%Y-%m-%dT%H:%M:%S.000Z",tz="UTC"),
                      as.POSIXct(time,format="%Y-%m-%dT%H:%M:%SZ",tz="UTC"))
                            ) %>%
-  select(-date,-ele,-day)
+  select(-date,-one_of("ele"),-day)
 ```
 
 ```{r}
