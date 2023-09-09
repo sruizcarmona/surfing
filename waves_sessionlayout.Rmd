@@ -74,7 +74,7 @@ library(leaflet)
 library(XML)
 library(geosphere)
 library(RColorBrewer)
-library(fit)
+# library(fit)
 ```
 
 ```{r}
@@ -100,9 +100,9 @@ gpx <- readGPX("data/surf_gunnamata_201115.gpx")
 gpx <- readGPX("SURFING_POLAR/surfing_polar_2021-10-26T15-00-19.gpx")
 gpx <- gpx$tracks[[1]][[1]]
 tcx <- readTCX('data/Sergio_Ruiz_2022-04-25_11-33-04.TCX')
-fitdata <- read.fit('data/ninasurf.fit')
+# fitdata <- read.fit('data/ninasurf.fit')
 # head(fitdata$record)
-gpx <- fitdata$record %>% 
+gpx <- gpx$record %>% 
   # head() %>% 
   select(lat=position_lat,
          lon=position_long,
