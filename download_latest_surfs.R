@@ -1,9 +1,11 @@
-library(httr)
-library(jsonlite)
-# library(tidyverse)
-# library(leaflet)
-library(rlang)
-library(yaml)
+suppressPackageStartupMessages({
+  library(httr)
+  library(jsonlite, quietly = T)
+  # library(tidyverse)
+  # library(leaflet)
+  library(rlang, quietly = T, )
+  library(yaml)
+})
 
 # Step 1: Polar
 # Get file from polar API
