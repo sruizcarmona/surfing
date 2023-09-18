@@ -1,9 +1,9 @@
 suppressPackageStartupMessages({
   library(httr)
-  library(jsonlite, quietly = T)
-  # library(tidyverse)
+  library(jsonlite)
+  library(tidyverse)
   # library(leaflet)
-  library(rlang, quietly = T, )
+  # library(rlang, quietly = T, )
   library(yaml)
 })
 
